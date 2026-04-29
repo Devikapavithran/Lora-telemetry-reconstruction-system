@@ -1,0 +1,1803 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>PS-2 | LoRa Telemetry Reconstruction System</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;400;600;700&display=swap" rel="stylesheet"/>
+<style>
+/* ============================================================
+   ROOT / TOKENS
+============================================================ */
+:root {
+  --bg-void:    #020508;
+  --bg-deep:    #050c14;
+  --bg-panel:   #080f1a;
+  --bg-card:    #0c1522;
+  --bg-hover:   #111d2e;
+  --border:     rgba(0,220,255,0.10);
+  --border-md:  rgba(0,220,255,0.22);
+  --border-hi:  rgba(0,220,255,0.45);
+
+  --cyan:   #00dcff;
+  --green:  #00ff9d;
+  --amber:  #ffb800;
+  --red:    #ff3b3b;
+  --violet: #b06fff;
+
+  --text-hi:  #e8f4ff;
+  --text-md:  #7ba8c4;
+  --text-lo:  #2d4a5e;
+
+  --mono: 'Share Tech Mono', monospace;
+  --display: 'Orbitron', sans-serif;
+  --body: 'Exo 2', sans-serif;
+
+  --glow-cyan:  0 0 12px rgba(0,220,255,.35);
+  --glow-green: 0 0 12px rgba(0,255,157,.35);
+  --glow-amber: 0 0 12px rgba(255,184,0,.35);
+  --glow-red:   0 0 14px rgba(255,59,59,.45);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg-void);
+  color: var(--text-hi);
+  font-family: var(--body);
+  font-size: 13px;
+  min-height: 100vh;
+  overflow-x: hidden;
+  cursor: default;
+}
+
+/* scan-line overlay */
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 9999;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.03) 2px,
+    rgba(0,0,0,0.03) 4px
+  );
+  pointer-events: none;
+}
+
+/* ============================================================
+   SCROLLBARS
+============================================================ */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg-deep); }
+::-webkit-scrollbar-thumb { background: var(--border-md); border-radius: 2px; }
+
+/* ============================================================
+   HEADER
+============================================================ */
+.header {
+  position: sticky; top: 0; z-index: 200;
+  background: var(--bg-deep);
+  border-bottom: 1px solid var(--border-md);
+  padding: 0 24px;
+  height: 56px;
+  display: flex; align-items: center; gap: 20px;
+}
+
+.header-logo {
+  display: flex; align-items: center; gap: 10px;
+}
+
+.logo-icon {
+  width: 36px; height: 36px;
+  border: 1px solid var(--border-hi);
+  border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  position: relative;
+  background: rgba(0,220,255,0.05);
+}
+
+.logo-icon::before {
+  content: '';
+  position: absolute; inset: 3px;
+  border: 1px solid var(--cyan);
+  border-radius: 2px;
+  opacity: 0.5;
+  animation: logoSpin 8s linear infinite;
+}
+
+@keyframes logoSpin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.logo-icon svg { width: 18px; height: 18px; fill: var(--cyan); position: relative; z-index:1; }
+
+.logo-text {
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--cyan);
+  text-shadow: var(--glow-cyan);
+}
+
+.logo-sub {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-lo);
+  letter-spacing: 1.5px;
+  margin-top: 1px;
+}
+
+.header-sep { flex: 1; }
+
+.header-status {
+  display: flex; align-items: center; gap: 20px;
+  font-family: var(--mono); font-size: 10px; color: var(--text-md);
+}
+
+.status-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  display: inline-block; margin-right: 5px;
+}
+
+.dot-green { background: var(--green); box-shadow: var(--glow-green); animation: blink 2s ease-in-out infinite; }
+.dot-amber { background: var(--amber); box-shadow: var(--glow-amber); animation: blink 1.2s ease-in-out infinite; }
+.dot-red   { background: var(--red);   box-shadow: var(--glow-red);   animation: blink 0.6s ease-in-out infinite; }
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+#live-clock {
+  font-family: var(--display);
+  font-size: 12px;
+  color: var(--cyan);
+  letter-spacing: 2px;
+  text-shadow: var(--glow-cyan);
+}
+
+/* ============================================================
+   LAYOUT
+============================================================ */
+.main-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr 280px;
+  grid-template-rows: auto;
+  gap: 0;
+  height: calc(100vh - 56px);
+  overflow: hidden;
+}
+
+.panel-left, .panel-right {
+  background: var(--bg-deep);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.panel-right {
+  border-right: none;
+  border-left: 1px solid var(--border);
+}
+
+.panel-center {
+  background: var(--bg-void);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ============================================================
+   CARDS
+============================================================ */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.card-header {
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  padding: 8px 12px;
+  display: flex; align-items: center; gap: 8px;
+}
+
+.card-header-title {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--text-md);
+  text-transform: uppercase;
+  flex: 1;
+}
+
+.card-body { padding: 12px; }
+
+.card-accent-left {
+  border-left: 2px solid var(--cyan);
+}
+
+.card-accent-amber { border-left: 2px solid var(--amber); }
+.card-accent-red   { border-left: 2px solid var(--red); }
+.card-accent-green { border-left: 2px solid var(--green); }
+.card-accent-violet { border-left: 2px solid var(--violet); }
+
+/* ============================================================
+   METRIC TILES
+============================================================ */
+.metric-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.metric-tile {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px;
+}
+
+.m-label {
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 1.5px;
+  color: var(--text-lo);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.m-value {
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--cyan);
+}
+
+.m-value.amber { color: var(--amber); }
+.m-value.green { color: var(--green); }
+.m-value.red   { color: var(--red); }
+.m-value.violet { color: var(--violet); }
+
+.m-sub {
+  font-family: var(--mono);
+  font-size: 8px;
+  color: var(--text-lo);
+  margin-top: 3px;
+}
+
+/* ============================================================
+   NODE TABLE
+============================================================ */
+.node-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.node-table th {
+  color: var(--text-lo);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 8px;
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-weight: 400;
+}
+
+.node-table td {
+  padding: 6px 6px;
+  border-bottom: 1px solid rgba(0,220,255,0.05);
+  color: var(--text-md);
+  vertical-align: middle;
+}
+
+.node-table tr:hover td {
+  background: rgba(0,220,255,0.03);
+  color: var(--text-hi);
+}
+
+/* ============================================================
+   BADGES
+============================================================ */
+.badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 7px;
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.badge-verified  { background: rgba(0,255,157,.1);  color: var(--green);  border: 1px solid rgba(0,255,157,.25); }
+.badge-estimated { background: rgba(255,184,0,.1);   color: var(--amber);  border: 1px solid rgba(255,184,0,.3); border-style: dashed; }
+.badge-fragment  { background: rgba(255,59,59,.1);   color: var(--red);    border: 1px solid rgba(255,59,59,.3); }
+.badge-offline   { background: rgba(45,74,94,.2);    color: var(--text-lo); border: 1px solid var(--border); }
+.badge-live      { background: rgba(0,220,255,.1);   color: var(--cyan);   border: 1px solid rgba(0,220,255,.25); }
+
+/* ============================================================
+   MAP CANVAS AREA
+============================================================ */
+.map-wrap {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+#mapCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+
+.map-overlay-corner {
+  position: absolute;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-lo);
+  padding: 6px 10px;
+  pointer-events: none;
+}
+
+.map-overlay-corner.tl { top: 8px; left: 8px; }
+.map-overlay-corner.tr { top: 8px; right: 8px; text-align: right; }
+.map-overlay-corner.bl { bottom: 8px; left: 8px; }
+.map-overlay-corner.br { bottom: 8px; right: 8px; text-align: right; }
+
+.map-legend {
+  position: absolute;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 18px;
+  background: rgba(5,12,20,0.85);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 14px;
+  font-family: var(--mono);
+  font-size: 9px;
+  pointer-events: none;
+}
+
+.legend-item { display: flex; align-items: center; gap: 6px; }
+.legend-dot  { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+/* ============================================================
+   BOTTOM MAP BAR
+============================================================ */
+.map-toolbar {
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+.toolbar-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-lo);
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   BUTTONS
+============================================================ */
+.btn {
+  background: transparent;
+  border: 1px solid var(--border-md);
+  color: var(--cyan);
+  padding: 5px 12px;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  background: rgba(0,220,255,0.08);
+  border-color: var(--cyan);
+  box-shadow: var(--glow-cyan);
+}
+
+.btn:active { transform: scale(0.97); }
+
+.btn-red { border-color: rgba(255,59,59,.4); color: var(--red); }
+.btn-red:hover { background: rgba(255,59,59,.08); border-color: var(--red); box-shadow: var(--glow-red); }
+
+.btn-green { border-color: rgba(0,255,157,.3); color: var(--green); }
+.btn-green:hover { background: rgba(0,255,157,.08); border-color: var(--green); box-shadow: var(--glow-green); }
+
+.btn-amber { border-color: rgba(255,184,0,.3); color: var(--amber); }
+.btn-amber:hover { background: rgba(255,184,0,.08); border-color: var(--amber); box-shadow: var(--glow-amber); }
+
+/* ============================================================
+   RANGE SLIDER
+============================================================ */
+input[type=range] {
+  -webkit-appearance: none;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--bg-void);
+  cursor: pointer;
+  flex: 1;
+  min-width: 60px;
+}
+
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 8px var(--cyan);
+  cursor: pointer;
+}
+
+/* ============================================================
+   LOG / FEED
+============================================================ */
+.log-wrap {
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.log-entry {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(0,220,255,.04);
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.log-ts { color: var(--text-lo); min-width: 62px; flex-shrink: 0; }
+.log-node { min-width: 70px; flex-shrink: 0; }
+.log-msg  { color: var(--text-md); }
+
+.log-ok     { color: var(--green); }
+.log-warn   { color: var(--amber); }
+.log-err    { color: var(--red); }
+.log-info   { color: var(--cyan); }
+.log-violet { color: var(--violet); }
+
+/* ============================================================
+   KALMAN STATE VISUALIZER
+============================================================ */
+.kalman-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.kf-cell {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 8px;
+}
+
+.kf-label {
+  font-family: var(--mono);
+  font-size: 8px;
+  color: var(--text-lo);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 3px;
+}
+
+.kf-value {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-hi);
+}
+
+/* ============================================================
+   WAVEFORM / SPARKLINE
+============================================================ */
+.sparkwrap {
+  height: 36px;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.spark-bar {
+  flex: 1;
+  border-radius: 1px 1px 0 0;
+  min-width: 3px;
+  transition: height 0.2s, background 0.2s;
+}
+
+/* ============================================================
+   PROGRESS BAR
+============================================================ */
+.pbar-wrap {
+  height: 3px;
+  background: var(--bg-void);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.pbar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s;
+}
+
+.fill-cyan   { background: var(--cyan); }
+.fill-green  { background: var(--green); }
+.fill-amber  { background: var(--amber); }
+.fill-red    { background: var(--red); }
+.fill-violet { background: var(--violet); }
+
+/* ============================================================
+   PACKET VISUALIZER
+============================================================ */
+#packetCanvas {
+  width: 100%;
+  height: 70px;
+  display: block;
+  border-radius: 3px;
+}
+
+/* ============================================================
+   INTEGRITY METER
+============================================================ */
+.integrity-ring-wrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0;
+}
+
+#integrityCanvas { flex-shrink: 0; }
+
+.integrity-stats { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+
+.integrity-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.integrity-key { color: var(--text-lo); }
+.integrity-val { color: var(--text-hi); }
+
+/* ============================================================
+   DIVIDER
+============================================================ */
+.divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 10px 0;
+}
+
+/* ============================================================
+   TOOLTIP ON MAP
+============================================================ */
+#mapTooltip {
+  position: absolute;
+  background: rgba(5,12,20,0.96);
+  border: 1px solid var(--border-md);
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-hi);
+  pointer-events: none;
+  z-index: 100;
+  display: none;
+  min-width: 160px;
+}
+
+#mapTooltip .tt-name { color: var(--cyan); font-size: 10px; margin-bottom: 5px; letter-spacing: 1px; }
+#mapTooltip .tt-row  { display: flex; justify-content: space-between; gap: 12px; color: var(--text-md); margin-top: 2px; }
+#mapTooltip .tt-val  { color: var(--text-hi); }
+
+/* ============================================================
+   SECTION LABEL
+============================================================ */
+.section-lbl {
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 2px;
+  color: var(--text-lo);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ============================================================
+   ANIMATIONS
+============================================================ */
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in { animation: fadeSlideIn 0.3s ease forwards; }
+
+/* corner brackets decoration */
+.bracket-box {
+  position: relative;
+  padding: 2px;
+}
+
+.bracket-box::before, .bracket-box::after {
+  content: '';
+  position: absolute;
+  width: 8px; height: 8px;
+  border-color: var(--cyan);
+  border-style: solid;
+  opacity: 0.5;
+}
+
+.bracket-box::before { top: 0; left: 0; border-width: 1px 0 0 1px; }
+.bracket-box::after  { bottom: 0; right: 0; border-width: 0 1px 1px 0; }
+
+/* ============================================================
+   RESPONSIVE / MOBILE FALLBACK
+============================================================ */
+@media (max-width: 1100px) {
+  .main-layout {
+    grid-template-columns: 260px 1fr 240px;
+  }
+}
+
+@media (max-width: 900px) {
+  .main-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    height: auto;
+    overflow: visible;
+  }
+  .panel-left, .panel-right {
+    border-right: none;
+    border-left: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-center { height: 420px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════
+     HEADER
+════════════════════════════════════════════════════════════ -->
+<header class="header">
+  <div class="header-logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 20 20"><polygon points="10,2 18,7 18,13 10,18 2,13 2,7"/><circle cx="10" cy="10" r="2.5"/></svg>
+    </div>
+    <div>
+      <div class="logo-text">SENTINEL · PS-2</div>
+      <div class="logo-sub">LORA TELEMETRY RECONSTRUCTION SYSTEM — v2.4.1</div>
+    </div>
+  </div>
+
+  <div class="header-sep"></div>
+
+  <div class="header-status">
+    <span><span class="status-dot dot-green"></span>GATEWAY ONLINE</span>
+    <span><span class="status-dot dot-amber" id="lossIndicator"></span>PACKET LOSS: <span id="hdr-loss">--</span>%</span>
+    <span><span class="status-dot" id="kalmanDot"></span>KALMAN: <span id="hdr-kalman">STANDBY</span></span>
+    <span id="live-clock">00:00:00Z</span>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════
+     MAIN 3-COLUMN LAYOUT
+════════════════════════════════════════════════════════════ -->
+<div class="main-layout">
+
+  <!-- ────────────────────────────────────────────
+       LEFT PANEL — Node Registry & Controls
+  ──────────────────────────────────────────── -->
+  <aside class="panel-left">
+
+    <!-- METRIC TILES -->
+    <div class="card card-accent-left">
+      <div class="card-header">
+        <div class="card-header-title">NETWORK TELEMETRY — LIVE</div>
+        <span class="badge badge-live">LIVE</span>
+      </div>
+      <div class="card-body">
+        <div class="metric-grid">
+          <div class="metric-tile">
+            <div class="m-label">Active Nodes</div>
+            <div class="m-value" id="m-active">--</div>
+            <div class="m-sub">of <span id="m-total">8</span> online</div>
+          </div>
+          <div class="metric-tile">
+            <div class="m-label">Packet Loss</div>
+            <div class="m-value amber" id="m-loss">--</div>
+            <div class="m-sub">avg last 60s</div>
+          </div>
+          <div class="metric-tile">
+            <div class="m-label">Reconstructed</div>
+            <div class="m-value green" id="m-recon">0</div>
+            <div class="m-sub">this session</div>
+          </div>
+          <div class="metric-tile">
+            <div class="m-label">Kalman MSE</div>
+            <div class="m-value violet" id="m-mse">--</div>
+            <div class="m-sub">position error</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- NODE STATUS TABLE -->
+    <div class="card card-accent-amber">
+      <div class="card-header">
+        <div class="card-header-title">NODE REGISTRY</div>
+        <button class="btn btn-red" onclick="simulateFragmentation()">SIM FRAG EVENT</button>
+      </div>
+      <div class="card-body" style="padding:0">
+        <table class="node-table" id="nodeTable">
+          <thead>
+            <tr>
+              <th>NODE ID</th>
+              <th>STATUS</th>
+              <th>RSSI</th>
+              <th>VEL</th>
+              <th>HDG</th>
+            </tr>
+          </thead>
+          <tbody id="nodeTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- CONTROLS -->
+    <div class="card card-accent-green">
+      <div class="card-header">
+        <div class="card-header-title">SIMULATION CONTROLS</div>
+      </div>
+      <div class="card-body">
+        <div class="section-lbl">LoRa Parameters</div>
+
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <span class="toolbar-label" style="min-width:90px">Loss Rate</span>
+          <input type="range" min="0" max="60" value="20" id="lossRange"
+            oninput="setLossRate(this.value)"/>
+          <span style="font-family:var(--mono);font-size:10px;color:var(--amber);min-width:28px" id="lossRangeVal">20%</span>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <span class="toolbar-label" style="min-width:90px">Frag Prob</span>
+          <input type="range" min="0" max="40" value="12" id="fragRange"
+            oninput="setFragProb(this.value)"/>
+          <span style="font-family:var(--mono);font-size:10px;color:var(--red);min-width:28px" id="fragRangeVal">12%</span>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+          <span class="toolbar-label" style="min-width:90px">Node Speed</span>
+          <input type="range" min="1" max="10" value="4" id="speedRange"
+            oninput="setNodeSpeed(this.value)"/>
+          <span style="font-family:var(--mono);font-size:10px;color:var(--cyan);min-width:28px" id="speedRangeVal">4x</span>
+        </div>
+
+        <hr class="divider"/>
+
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-green" onclick="addNode()">+ ADD NODE</button>
+          <button class="btn btn-red" onclick="killRandomNode()">KILL NODE</button>
+          <button class="btn btn-amber" onclick="resetSim()">RESET</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SIGNAL QUALITY SPARKLINE -->
+    <div class="card card-accent-violet">
+      <div class="card-header">
+        <div class="card-header-title">RSSI HISTORY — DELTA-03</div>
+      </div>
+      <div class="card-body">
+        <div class="sparkwrap" id="rssiSpark"></div>
+        <div style="display:flex;justify-content:space-between;margin-top:4px;font-family:var(--mono);font-size:8px;color:var(--text-lo)">
+          <span>-130 dBm</span><span>SIGNAL STRENGTH</span><span>-60 dBm</span>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ────────────────────────────────────────────
+       CENTER PANEL — MAP + TOOLBAR
+  ──────────────────────────────────────────── -->
+  <main class="panel-center">
+    <div class="map-wrap">
+      <canvas id="mapCanvas"></canvas>
+
+      <!-- CORNER OVERLAYS -->
+      <div class="map-overlay-corner tl">
+        GRID 42RPQ — CLASSIFIED AO<br/>
+        <span id="frameCount">FRAME: 0</span>
+      </div>
+      <div class="map-overlay-corner tr">
+        ALT: MSL+120m<br/>
+        DATUM: WGS-84
+      </div>
+      <div class="map-overlay-corner bl">
+        <span id="hoverCoord">HOVER FOR COORDS</span>
+      </div>
+      <div class="map-overlay-corner br">
+        <span id="hoverInfo"></span>
+      </div>
+
+      <!-- LEGEND -->
+      <div class="map-legend">
+        <div class="legend-item">
+          <div class="legend-dot" style="background:var(--green);box-shadow:0 0 6px var(--green)"></div>
+          <span style="color:var(--text-md)">VERIFIED</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-dot" style="background:var(--amber);box-shadow:0 0 6px var(--amber);border:1px dashed var(--amber);background:transparent"></div>
+          <span style="color:var(--text-md)">KALMAN EST.</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-dot" style="background:var(--red);box-shadow:0 0 6px var(--red)"></div>
+          <span style="color:var(--text-md)">FRAGMENTED</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-dot" style="background:var(--text-lo)"></div>
+          <span style="color:var(--text-md)">OFFLINE</span>
+        </div>
+      </div>
+
+      <!-- TOOLTIP -->
+      <div id="mapTooltip">
+        <div class="tt-name" id="tt-name">NODE ID</div>
+        <div class="tt-row"><span>STATUS</span><span class="tt-val" id="tt-status">—</span></div>
+        <div class="tt-row"><span>COORD</span><span class="tt-val" id="tt-coord">—</span></div>
+        <div class="tt-row"><span>RSSI</span><span class="tt-val" id="tt-rssi">—</span></div>
+        <div class="tt-row"><span>VELOCITY</span><span class="tt-val" id="tt-vel">—</span></div>
+        <div class="tt-row"><span>HEADING</span><span class="tt-val" id="tt-hdg">—</span></div>
+        <div class="tt-row"><span>KALMAN σ</span><span class="tt-val" id="tt-sigma">—</span></div>
+      </div>
+    </div>
+
+    <!-- MAP TOOLBAR -->
+    <div class="map-toolbar">
+      <span class="toolbar-label">PACKET STREAM:</span>
+      <canvas id="packetCanvas"></canvas>
+      <span class="toolbar-label" style="margin-left:8px">AUTO-CORRECT:</span>
+      <button class="btn" id="autocorrectBtn" onclick="toggleAutocorrect()">ON</button>
+      <span class="toolbar-label">PLAYBACK:</span>
+      <button class="btn" id="pauseBtn" onclick="togglePause()">PAUSE</button>
+      <span class="toolbar-label" style="margin-left:auto;font-family:var(--display);font-size:9px;color:var(--cyan)" id="reconstructionRate">RECON RATE: --%</span>
+    </div>
+  </main>
+
+  <!-- ────────────────────────────────────────────
+       RIGHT PANEL — Kalman State & Logs
+  ──────────────────────────────────────────── -->
+  <aside class="panel-right">
+
+    <!-- KALMAN FILTER STATE -->
+    <div class="card card-accent-cyan" style="border-left-color:var(--cyan)">
+      <div class="card-header">
+        <div class="card-header-title">KALMAN FILTER STATE</div>
+        <span class="badge badge-live" id="kfBadge">ACTIVE</span>
+      </div>
+      <div class="card-body">
+        <div class="section-lbl">Active Reconstruction — DELTA-03</div>
+        <div class="kalman-grid">
+          <div class="kf-cell">
+            <div class="kf-label">Last Valid (t-1)</div>
+            <div class="kf-value" id="kf-t1" style="color:var(--amber)">—</div>
+          </div>
+          <div class="kf-cell">
+            <div class="kf-label">Predicted (t)</div>
+            <div class="kf-value" id="kf-pred" style="color:var(--green)">—</div>
+          </div>
+          <div class="kf-cell">
+            <div class="kf-label">Velocity Vector</div>
+            <div class="kf-value" id="kf-vel" style="color:var(--cyan)">—</div>
+          </div>
+          <div class="kf-cell">
+            <div class="kf-label">Uncertainty σ</div>
+            <div class="kf-value" id="kf-sigma" style="color:var(--red)">—</div>
+          </div>
+          <div class="kf-cell" style="grid-column:1/-1">
+            <div class="kf-label">Innovation / Residual</div>
+            <div class="kf-value" id="kf-resid" style="color:var(--violet)">—</div>
+          </div>
+        </div>
+
+        <!-- INTEGRITY RING -->
+        <div class="section-lbl">Packet Integrity Score</div>
+        <div class="integrity-ring-wrap">
+          <canvas id="integrityCanvas" width="72" height="72"></canvas>
+          <div class="integrity-stats">
+            <div class="integrity-row">
+              <span class="integrity-key">CHECKSUM OK</span>
+              <span class="integrity-val" id="int-ok">—</span>
+            </div>
+            <div class="integrity-row">
+              <span class="integrity-key">CRC FAIL</span>
+              <span class="integrity-val" id="int-crc" style="color:var(--red)">—</span>
+            </div>
+            <div class="integrity-row">
+              <span class="integrity-key">PARTIAL JSON</span>
+              <span class="integrity-val" id="int-partial" style="color:var(--amber)">—</span>
+            </div>
+            <div class="integrity-row">
+              <span class="integrity-key">AUTO-REPAIRED</span>
+              <span class="integrity-val" id="int-repair" style="color:var(--green)">—</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DATA INTEGRITY CHECK -->
+    <div class="card card-accent-amber">
+      <div class="card-header">
+        <div class="card-header-title">DATA INTEGRITY ENGINE</div>
+      </div>
+      <div class="card-body">
+        <div class="section-lbl">Detection Modules</div>
+        <div style="display:flex;flex-direction:column;gap:7px">
+          <div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+              <span style="font-family:var(--mono);font-size:9px;color:var(--text-md)">Checksum Validator</span>
+              <span style="font-family:var(--mono);font-size:9px;color:var(--green)">OK</span>
+            </div>
+            <div class="pbar-wrap"><div class="pbar-fill fill-green" style="width:96%"></div></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+              <span style="font-family:var(--mono);font-size:9px;color:var(--text-md)">NMEA Syntax Parser</span>
+              <span style="font-family:var(--mono);font-size:9px;color:var(--cyan)">ACTIVE</span>
+            </div>
+            <div class="pbar-wrap"><div class="pbar-fill fill-cyan" style="width:88%"></div></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+              <span style="font-family:var(--mono);font-size:9px;color:var(--text-md)">JSON Fragment Detect</span>
+              <span style="font-family:var(--mono);font-size:9px;color:var(--amber)">MONITORING</span>
+            </div>
+            <div class="pbar-wrap"><div class="pbar-fill fill-amber" style="width:72%"></div></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+              <span style="font-family:var(--mono);font-size:9px;color:var(--text-md)">Header/Footer Repair</span>
+              <span style="font-family:var(--mono);font-size:9px;color:var(--violet)">ARMED</span>
+            </div>
+            <div class="pbar-wrap"><div class="pbar-fill fill-violet" style="width:100%"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RECONSTRUCTION LOG -->
+    <div class="card card-accent-green" style="flex:1;min-height:0">
+      <div class="card-header">
+        <div class="card-header-title">RECONSTRUCTION LOG</div>
+        <button class="btn" style="font-size:8px;padding:2px 6px" onclick="clearLog()">CLR</button>
+      </div>
+      <div class="card-body" style="padding:8px">
+        <div class="log-wrap" id="reconLog"></div>
+      </div>
+    </div>
+
+    <!-- RAW PACKET STREAM -->
+    <div class="card card-accent-red">
+      <div class="card-header">
+        <div class="card-header-title">RAW PACKET STREAM</div>
+      </div>
+      <div class="card-body" style="padding:8px">
+        <div class="log-wrap" style="max-height:100px" id="rawPacketLog"></div>
+      </div>
+    </div>
+
+  </aside>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     JAVASCRIPT ENGINE
+════════════════════════════════════════════════════════════ -->
+<script>
+/* ─────────────────────────────────────────────────────
+   SIMULATION STATE
+───────────────────────────────────────────────────── */
+let paused = false;
+let autocorrect = true;
+let lossRate = 0.20;
+let fragProb = 0.12;
+let speedMultiplier = 4;
+let frameCount = 0;
+let reconCount = 0;
+let sessionPackets = 0;
+let goodPackets = 0;
+let crcFails = 0;
+let partialJson = 0;
+let repaired = 0;
+
+const STATUS = { VERIFIED:'verified', ESTIMATED:'estimated', FRAGMENTED:'fragmented', OFFLINE:'offline' };
+
+let nodes = [];
+const NODE_IDS = ['ALPHA-01','BRAVO-02','DELTA-03','ECHO-04','FOXT-05','GOLF-06','HOTEL-07','INDIA-08'];
+
+function initNodes() {
+  nodes = NODE_IDS.map((id, i) => ({
+    id,
+    x: 0.1 + Math.random() * 0.8,
+    y: 0.1 + Math.random() * 0.8,
+    vx: (Math.random() - 0.5) * 0.002,
+    vy: (Math.random() - 0.5) * 0.002,
+    status: STATUS.VERIFIED,
+    rssi: -68 - Math.random() * 40,
+    heading: Math.random() * 360,
+    sigma: 2 + Math.random() * 3,
+    history: [],
+    fragTimer: 0,
+    online: i < 6,
+    kalman: { x: 0, y: 0, vx: 0, vy: 0 },
+    profile: { avgVx: 0, avgVy: 0, sampleCount: 0 }
+  }));
+  nodes.forEach(n => { n.kalman.x = n.x; n.kalman.y = n.y; n.kalman.vx = n.vx; n.kalman.vy = n.vy; });
+}
+
+initNodes();
+
+/* ─────────────────────────────────────────────────────
+   KALMAN FILTER (simplified 2D constant velocity)
+───────────────────────────────────────────────────── */
+function kalmanPredict(n) {
+  // x = x + vx; y = y + vy (with process noise)
+  const pn = 0.0001;
+  n.kalman.x  = n.kalman.x  + n.kalman.vx + (Math.random()-0.5)*pn;
+  n.kalman.y  = n.kalman.y  + n.kalman.vy + (Math.random()-0.5)*pn;
+  n.sigma = Math.min(n.sigma * 1.05 + 0.1, 20);
+}
+
+function kalmanUpdate(n, measX, measY) {
+  const K = 0.4;
+  n.kalman.x  = n.kalman.x  + K * (measX - n.kalman.x);
+  n.kalman.y  = n.kalman.y  + K * (measY - n.kalman.y);
+  n.kalman.vx = (measX - n.kalman.x) * 0.3 + n.kalman.vx * 0.7;
+  n.kalman.vy = (measY - n.kalman.y) * 0.3 + n.kalman.vy * 0.7;
+  n.sigma = Math.max(n.sigma * 0.7, 1.2);
+}
+
+/* ─────────────────────────────────────────────────────
+   NODE PROFILE (historical buffer)
+───────────────────────────────────────────────────── */
+function updateProfile(n) {
+  n.profile.avgVx = n.profile.avgVx * 0.9 + n.vx * 0.1;
+  n.profile.avgVy = n.profile.avgVy * 0.9 + n.vy * 0.1;
+  n.profile.sampleCount++;
+}
+
+/* ─────────────────────────────────────────────────────
+   PACKET SIMULATION
+───────────────────────────────────────────────────── */
+function processPacket(n) {
+  sessionPackets++;
+  const roll = Math.random();
+
+  if (roll < lossRate) {
+    // Packet lost
+    crcFails++;
+    n.fragTimer = 0;
+    if (n.status === STATUS.VERIFIED) {
+      n.status = STATUS.FRAGMENTED;
+      kalmanPredict(n);
+      addLog(`${n.id}`, `CRC mismatch — packet dropped (SNR < threshold)`, 'err');
+      addRawPacket(n.id, 'DROP', '??:??:??:??:??');
+      setTimeout(() => {
+        if (n.status === STATUS.FRAGMENTED && n.online) {
+          n.status = autocorrect ? STATUS.ESTIMATED : STATUS.FRAGMENTED;
+          if (autocorrect) {
+            partialJson++;
+            addLog(n.id, `Partial JSON detected — header repaired from node profile`, 'warn');
+            addRawPacket(n.id, 'PARTIAL', `{"id":"${n.id}","lat":..,"lon":..`);
+          }
+        }
+      }, 1200);
+      setTimeout(() => {
+        if (n.online && (n.status === STATUS.FRAGMENTED || n.status === STATUS.ESTIMATED)) {
+          n.status = STATUS.VERIFIED;
+          reconCount++;
+          repaired++;
+          goodPackets++;
+          kalmanUpdate(n, n.x, n.y);
+          document.getElementById('m-recon').textContent = reconCount;
+          addLog(n.id, `Packet reconstructed — Kalman convergence achieved (σ=${n.sigma.toFixed(1)}m)`, 'ok');
+          addRawPacket(n.id, 'OK', `{"id":"${n.id}","lat":${coordFmt(n.x)},"lon":${coordFmt(n.y)},"vel":${speed(n)},"hdg":${Math.round(n.heading)}}`);
+        }
+      }, 4000 + Math.random() * 2000);
+    }
+  } else if (roll < lossRate + fragProb) {
+    // Fragmented packet
+    partialJson++;
+    addLog(n.id, `Incomplete NMEA sentence — dead zone fragmentation`, 'warn');
+    addRawPacket(n.id, 'FRAG', `$GPGGA,${Math.floor(Math.random()*240000)},${coordFmt(n.x)},N,${coordFmt(n.y)},`);
+    if (autocorrect) {
+      setTimeout(() => {
+        repaired++;
+        goodPackets++;
+        kalmanUpdate(n, n.x, n.y);
+        addLog(n.id, `Auto-corrected: footer appended from node profile`, 'violet');
+        addRawPacket(n.id, 'REPAIRED', `$GPGGA,...,E,1,08,0.9,23.2,M*6A`);
+      }, 800 + Math.random() * 600);
+    }
+  } else {
+    // Good packet
+    goodPackets++;
+    kalmanUpdate(n, n.x, n.y);
+    updateProfile(n);
+    if (n.status !== STATUS.VERIFIED) n.status = STATUS.VERIFIED;
+    if (frameCount % 60 === 0) {
+      addRawPacket(n.id, 'OK', `{"id":"${n.id}","lat":${coordFmt(n.x)},"lon":${coordFmt(n.y)},"vel":${speed(n)},"hdg":${Math.round(n.heading)},` +
+        `"rssi":${Math.round(n.rssi)},"snr":${(Math.random()*20-5).toFixed(1)}}`);
+    }
+  }
+}
+
+/* ─────────────────────────────────────────────────────
+   LOG HELPERS
+───────────────────────────────────────────────────── */
+const logEntries = [];
+const rawEntries = [];
+
+function timestamp() {
+  const d = new Date();
+  const z = n => String(n).padStart(2,'0');
+  return `${z(d.getUTCHours())}:${z(d.getUTCMinutes())}:${z(d.getUTCSeconds())}Z`;
+}
+
+function addLog(nodeId, msg, type='info') {
+  logEntries.unshift({ ts: timestamp(), nodeId, msg, type });
+  if (logEntries.length > 80) logEntries.pop();
+  renderLog();
+}
+
+function renderLog() {
+  const el = document.getElementById('reconLog');
+  if (!el) return;
+  el.innerHTML = logEntries.slice(0, 20).map(e =>
+    `<div class="log-entry fade-in">
+      <span class="log-ts">${e.ts}</span>
+      <span class="log-node log-${e.type==='ok'?'ok':e.type==='err'?'err':e.type==='warn'?'warn':e.type==='violet'?'violet':'info'}">${e.nodeId}</span>
+      <span class="log-msg">${e.msg}</span>
+    </div>`
+  ).join('');
+}
+
+function addRawPacket(nodeId, type, payload) {
+  rawEntries.unshift({ ts: timestamp(), nodeId, type, payload });
+  if (rawEntries.length > 40) rawEntries.pop();
+  renderRawLog();
+}
+
+function renderRawLog() {
+  const el = document.getElementById('rawPacketLog');
+  if (!el) return;
+  const typeColor = { OK:'var(--green)', DROP:'var(--red)', FRAG:'var(--amber)', PARTIAL:'var(--amber)', REPAIRED:'var(--violet)' };
+  el.innerHTML = rawEntries.slice(0, 6).map(e =>
+    `<div class="log-entry">
+      <span class="log-ts">${e.ts}</span>
+      <span style="color:${typeColor[e.type]||'var(--cyan)'};min-width:58px;font-family:var(--mono);font-size:9px">${e.type}</span>
+      <span class="log-msg" style="font-size:8px;word-break:break-all">${e.payload}</span>
+    </div>`
+  ).join('');
+}
+
+function clearLog() { logEntries.length = 0; renderLog(); }
+
+/* ─────────────────────────────────────────────────────
+   COORDINATE HELPERS
+───────────────────────────────────────────────────── */
+function coordFmt(t) {
+  const base = 28.7 + t * 0.2;
+  return base.toFixed(4);
+}
+
+function speed(n) {
+  return (Math.sqrt(n.vx*n.vx + n.vy*n.vy) * 800).toFixed(1);
+}
+
+/* ─────────────────────────────────────────────────────
+   MAP RENDERER
+───────────────────────────────────────────────────── */
+const mapCanvas = document.getElementById('mapCanvas');
+const mapCtx = mapCanvas.getContext('2d');
+
+function resizeMap() {
+  const wrap = mapCanvas.parentElement;
+  mapCanvas.width  = wrap.clientWidth;
+  mapCanvas.height = wrap.clientHeight;
+}
+resizeMap();
+window.addEventListener('resize', resizeMap);
+
+function nodeScreenPos(n) {
+  return {
+    x: n.x * mapCanvas.width,
+    y: n.y * mapCanvas.height
+  };
+}
+
+function drawMap() {
+  const W = mapCanvas.width;
+  const H = mapCanvas.height;
+  const ctx = mapCtx;
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#030a12';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid
+  ctx.strokeStyle = 'rgba(0,220,255,0.05)';
+  ctx.lineWidth = 0.5;
+  const gridSize = 60;
+  for (let x = 0; x < W; x += gridSize) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for (let y = 0; y < H; y += gridSize) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+  // Terrain features (hills, obstacles)
+  const terrainFeatures = [
+    { x: 0.25, y: 0.3, rx: 0.10, ry: 0.07, color: 'rgba(0,255,157,0.04)' },
+    { x: 0.65, y: 0.55, rx: 0.12, ry: 0.08, color: 'rgba(0,220,255,0.03)' },
+    { x: 0.45, y: 0.75, rx: 0.08, ry: 0.05, color: 'rgba(0,255,157,0.03)' },
+    { x: 0.80, y: 0.20, rx: 0.07, ry: 0.05, color: 'rgba(255,184,0,0.03)' },
+  ];
+  terrainFeatures.forEach(f => {
+    ctx.beginPath();
+    ctx.ellipse(f.x * W, f.y * H, f.rx * W, f.ry * H, 0, 0, Math.PI * 2);
+    ctx.fillStyle = f.color;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,220,255,0.07)';
+    ctx.lineWidth = 0.5;
+    ctx.setLineDash([4, 8]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  });
+
+  // Uncertainty ellipses for estimated nodes
+  nodes.filter(n => n.online && n.status === STATUS.ESTIMATED).forEach(n => {
+    const p = nodeScreenPos(n);
+    const r = (n.sigma / 3) * 30;
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y, r * 1.4, r, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,184,0,0.2)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 5]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(255,184,0,0.04)';
+    ctx.fill();
+  });
+
+  // Trails / history
+  nodes.filter(n => n.online).forEach(n => {
+    if (n.history.length < 2) return;
+    const color = nodeStatusColor(n.status);
+    ctx.beginPath();
+    ctx.moveTo(n.history[0].x * W, n.history[0].y * H);
+    for (let i = 1; i < n.history.length; i++) {
+      ctx.lineTo(n.history[i].x * W, n.history[i].y * H);
+    }
+    ctx.strokeStyle = color + '30';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 6]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  });
+
+  // Kalman predicted path (dashed line from current pos to predicted)
+  const d3 = nodes.find(n => n.id === 'DELTA-03');
+  if (d3 && d3.online && d3.status === STATUS.ESTIMATED) {
+    const p = nodeScreenPos(d3);
+    const kx = d3.kalman.x * W;
+    const ky = d3.kalman.y * H;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(kx, ky);
+    ctx.strokeStyle = 'rgba(255,184,0,0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // Predicted pos dot
+    ctx.beginPath();
+    ctx.arc(kx, ky, 5, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,184,0,0.8)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,184,0,0.15)';
+    ctx.fill();
+  }
+
+  // Velocity vectors
+  nodes.filter(n => n.online && n.status === STATUS.VERIFIED).forEach(n => {
+    const p = nodeScreenPos(n);
+    const scale = 3000;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(p.x + n.vx * scale, p.y + n.vy * scale);
+    ctx.strokeStyle = nodeStatusColor(n.status) + '60';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    // arrowhead
+    const angle = Math.atan2(n.vy, n.vx);
+    const len = 6;
+    ctx.beginPath();
+    ctx.moveTo(p.x + n.vx * scale, p.y + n.vy * scale);
+    ctx.lineTo(
+      p.x + n.vx * scale - len * Math.cos(angle - 0.4),
+      p.y + n.vy * scale - len * Math.sin(angle - 0.4)
+    );
+    ctx.lineTo(
+      p.x + n.vx * scale - len * Math.cos(angle + 0.4),
+      p.y + n.vy * scale - len * Math.sin(angle + 0.4)
+    );
+    ctx.closePath();
+    ctx.fillStyle = nodeStatusColor(n.status) + '60';
+    ctx.fill();
+  });
+
+  // Nodes
+  nodes.forEach(n => {
+    if (!n.online) return;
+    const p = nodeScreenPos(n);
+    const color = nodeStatusColor(n.status);
+
+    // Glow halo
+    const grd = mapCtx.createRadialGradient(p.x, p.y, 2, p.x, p.y, 18);
+    grd.addColorStop(0, color + '35');
+    grd.addColorStop(1, color + '00');
+    ctx.beginPath(); ctx.arc(p.x, p.y, 18, 0, Math.PI * 2);
+    ctx.fillStyle = grd; ctx.fill();
+
+    if (n.status === STATUS.VERIFIED) {
+      ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+      ctx.fillStyle = color; ctx.fill();
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
+    } else if (n.status === STATUS.ESTIMATED) {
+      ctx.beginPath(); ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+      ctx.strokeStyle = color; ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]); ctx.stroke(); ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = color; ctx.fill();
+    } else if (n.status === STATUS.FRAGMENTED) {
+      ctx.strokeStyle = color; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(p.x-6,p.y-6); ctx.lineTo(p.x+6,p.y+6); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(p.x+6,p.y-6); ctx.lineTo(p.x-6,p.y+6); ctx.stroke();
+      // Ring
+      ctx.beginPath(); ctx.arc(p.x, p.y, 10, 0, Math.PI * 2);
+      ctx.strokeStyle = color + '50'; ctx.lineWidth = 1; ctx.stroke();
+    } else {
+      // Offline — dim X
+      ctx.strokeStyle = 'rgba(45,74,94,0.5)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(p.x-5,p.y-5); ctx.lineTo(p.x+5,p.y+5); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(p.x+5,p.y-5); ctx.lineTo(p.x-5,p.y+5); ctx.stroke();
+    }
+
+    // Label
+    ctx.font = '500 9px "Share Tech Mono"';
+    ctx.fillStyle = color;
+    ctx.textAlign = 'left';
+    ctx.fillText(n.id, p.x + 10, p.y - 4);
+    ctx.font = '9px "Share Tech Mono"';
+    ctx.fillStyle = color + '80';
+    ctx.fillText(speed(n) + 'm/s  ' + Math.round(n.heading) + '°', p.x + 10, p.y + 8);
+  });
+
+  document.getElementById('frameCount').textContent = `FRAME: ${frameCount}`;
+}
+
+function nodeStatusColor(status) {
+  return { verified:'#00ff9d', estimated:'#ffb800', fragmented:'#ff3b3b', offline:'#2d4a5e' }[status] || '#00dcff';
+}
+
+/* ─────────────────────────────────────────────────────
+   MAP HOVER / TOOLTIP
+───────────────────────────────────────────────────── */
+mapCanvas.addEventListener('mousemove', e => {
+  const rect = mapCanvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) / rect.width;
+  const my = (e.clientY - rect.top)  / rect.height;
+
+  document.getElementById('hoverCoord').textContent =
+    `${coordFmt(mx)}°N  ${coordFmt(my)}°E`;
+
+  const tt = document.getElementById('mapTooltip');
+  let hit = null;
+  nodes.forEach(n => {
+    if (!n.online) return;
+    const dx = n.x - mx, dy = n.y - my;
+    if (Math.sqrt(dx*dx + dy*dy) < 0.03) hit = n;
+  });
+
+  if (hit) {
+    tt.style.display = 'block';
+    tt.style.left = (e.clientX - mapCanvas.getBoundingClientRect().left + 14) + 'px';
+    tt.style.top  = (e.clientY - mapCanvas.getBoundingClientRect().top  - 10) + 'px';
+    document.getElementById('tt-name').textContent   = hit.id;
+    document.getElementById('tt-status').textContent = hit.status.toUpperCase();
+    document.getElementById('tt-coord').textContent  = `${coordFmt(hit.x)}°N ${coordFmt(hit.y)}°E`;
+    document.getElementById('tt-rssi').textContent   = `${Math.round(hit.rssi)} dBm`;
+    document.getElementById('tt-vel').textContent    = `${speed(hit)} m/s`;
+    document.getElementById('tt-hdg').textContent    = `${Math.round(hit.heading)}°`;
+    document.getElementById('tt-sigma').textContent  = `±${hit.sigma.toFixed(1)} m`;
+  } else {
+    tt.style.display = 'none';
+  }
+});
+
+mapCanvas.addEventListener('mouseleave', () => {
+  document.getElementById('mapTooltip').style.display = 'none';
+});
+
+/* ─────────────────────────────────────────────────────
+   PACKET STREAM CANVAS (bottom bar)
+───────────────────────────────────────────────────── */
+const pkCanvas = document.getElementById('packetCanvas');
+const pkCtx = pkCanvas.getContext('2d');
+const PACKET_BUF = [];
+
+function resizePacketCanvas() {
+  const wrap = pkCanvas.parentElement;
+  pkCanvas.width  = wrap.clientWidth - 320;
+  pkCanvas.height = 20;
+}
+resizePacketCanvas();
+
+function addPacketPulse(type) {
+  PACKET_BUF.push({ x: pkCanvas.width, type, age: 0 });
+  if (PACKET_BUF.length > 200) PACKET_BUF.shift();
+}
+
+function drawPacketStream() {
+  const W = pkCanvas.width, H = pkCanvas.height;
+  pkCtx.fillStyle = '#020508';
+  pkCtx.fillRect(0, 0, W, H);
+
+  // Baseline
+  pkCtx.strokeStyle = 'rgba(0,220,255,0.1)';
+  pkCtx.lineWidth = 0.5;
+  pkCtx.beginPath(); pkCtx.moveTo(0, H/2); pkCtx.lineTo(W, H/2); pkCtx.stroke();
+
+  const colorMap = { ok: '#00ff9d', drop: '#ff3b3b', frag: '#ffb800', repair: '#b06fff' };
+
+  PACKET_BUF.forEach(p => {
+    p.x -= 1.5;
+    const col = colorMap[p.type] || '#00dcff';
+    const h = p.type === 'ok' ? 8 : p.type === 'drop' ? 14 : 10;
+    pkCtx.fillStyle = col;
+    pkCtx.fillRect(p.x, H/2 - h/2, 2, h);
+  });
+}
+
+/* ─────────────────────────────────────────────────────
+   INTEGRITY RING CANVAS
+───────────────────────────────────────────────────── */
+const intCanvas = document.getElementById('integrityCanvas');
+const intCtx = intCanvas.getContext('2d');
+
+function drawIntegrityRing() {
+  const total = goodPackets + crcFails + Math.max(0, partialJson - repaired);
+  if (total === 0) return;
+  const pct = goodPackets / total;
+
+  intCtx.clearRect(0, 0, 72, 72);
+
+  // BG circle
+  intCtx.beginPath(); intCtx.arc(36, 36, 28, 0, Math.PI * 2);
+  intCtx.strokeStyle = 'rgba(0,220,255,0.1)';
+  intCtx.lineWidth = 6; intCtx.stroke();
+
+  // Arc
+  intCtx.beginPath();
+  intCtx.arc(36, 36, 28, -Math.PI/2, -Math.PI/2 + pct * Math.PI * 2);
+  intCtx.strokeStyle = pct > 0.8 ? '#00ff9d' : pct > 0.6 ? '#ffb800' : '#ff3b3b';
+  intCtx.lineWidth = 6; intCtx.lineCap = 'round'; intCtx.stroke();
+
+  // Label
+  intCtx.font = '700 14px Orbitron';
+  intCtx.fillStyle = '#e8f4ff';
+  intCtx.textAlign = 'center';
+  intCtx.textBaseline = 'middle';
+  intCtx.fillText(Math.round(pct * 100) + '%', 36, 36);
+}
+
+/* ─────────────────────────────────────────────────────
+   RSSI SPARKLINE
+───────────────────────────────────────────────────── */
+const rssiHistory = [];
+
+function renderRssiSpark() {
+  const d3 = nodes.find(n => n.id === 'DELTA-03');
+  if (!d3) return;
+  rssiHistory.push(d3.rssi);
+  if (rssiHistory.length > 40) rssiHistory.shift();
+
+  const el = document.getElementById('rssiSpark');
+  const min = -130, max = -60;
+  el.innerHTML = rssiHistory.map(v => {
+    const pct = Math.max(0, Math.min(1, (v - min) / (max - min)));
+    const h = Math.round(pct * 34) + 2;
+    const col = v > -85 ? 'var(--green)' : v > -100 ? 'var(--amber)' : 'var(--red)';
+    return `<div class="spark-bar" style="height:${h}px;background:${col};opacity:0.75"></div>`;
+  }).join('');
+}
+
+/* ─────────────────────────────────────────────────────
+   NODE TABLE
+───────────────────────────────────────────────────── */
+function renderNodeTable() {
+  const el = document.getElementById('nodeTableBody');
+  if (!el) return;
+  const badgeClass = { verified:'badge-verified', estimated:'badge-estimated', fragmented:'badge-fragment', offline:'badge-offline' };
+  el.innerHTML = nodes.map(n =>
+    `<tr>
+      <td style="color:var(--cyan)">${n.id}</td>
+      <td><span class="badge ${badgeClass[n.status]}">${n.status.toUpperCase()}</span></td>
+      <td style="color:${n.rssi > -85 ? 'var(--green)' : n.rssi > -100 ? 'var(--amber)' : 'var(--red)'}">${n.online ? Math.round(n.rssi) + 'dBm' : '—'}</td>
+      <td style="color:var(--text-hi)">${n.online ? speed(n) + 'm/s' : '—'}</td>
+      <td style="color:var(--text-md)">${n.online ? Math.round(n.heading) + '°' : '—'}</td>
+    </tr>`
+  ).join('');
+}
+
+/* ─────────────────────────────────────────────────────
+   HEADER METRICS
+───────────────────────────────────────────────────── */
+function updateHeaderMetrics() {
+  const online = nodes.filter(n => n.online).length;
+  const lossDisp = (lossRate * 100).toFixed(1);
+  const activeFragmented = nodes.filter(n => n.status === STATUS.FRAGMENTED || n.status === STATUS.ESTIMATED).length;
+  const mse = nodes.filter(n => n.online).reduce((s,n) => s + n.sigma, 0) / Math.max(1, online);
+
+  document.getElementById('m-active').textContent = online;
+  document.getElementById('m-loss').textContent   = lossDisp + '%';
+  document.getElementById('hdr-loss').textContent = lossDisp;
+  document.getElementById('m-mse').textContent    = mse.toFixed(1) + 'm';
+
+  const kalmanActive = nodes.some(n => n.status === STATUS.ESTIMATED);
+  const kalmanEl = document.getElementById('hdr-kalman');
+  const kalmanDot = document.getElementById('kalmanDot');
+  if (kalmanActive) {
+    kalmanEl.textContent = 'ACTIVE';
+    kalmanEl.style.color = 'var(--amber)';
+    kalmanDot.className  = 'status-dot dot-amber';
+    document.getElementById('kfBadge').textContent = 'ACTIVE';
+    document.getElementById('kfBadge').className = 'badge badge-estimated';
+  } else {
+    kalmanEl.textContent = 'STANDBY';
+    kalmanEl.style.color = 'var(--text-lo)';
+    kalmanDot.className  = 'status-dot';
+    kalmanDot.style.background = 'var(--text-lo)';
+  }
+
+  // Kalman state panel
+  const d3 = nodes.find(n => n.id === 'DELTA-03');
+  if (d3 && d3.online) {
+    document.getElementById('kf-t1').textContent   = `${coordFmt(d3.x)}°N, ${coordFmt(d3.y)}°E`;
+    document.getElementById('kf-pred').textContent = `${coordFmt(d3.kalman.x)}°N, ${coordFmt(d3.kalman.y)}°E`;
+    document.getElementById('kf-vel').textContent  = `${(Math.sqrt(d3.kalman.vx**2+d3.kalman.vy**2)*800).toFixed(2)} m/s @ ${Math.round(d3.heading)}°`;
+    document.getElementById('kf-sigma').textContent= `±${d3.sigma.toFixed(2)} m`;
+    const resid = Math.abs(d3.x - d3.kalman.x) * 10000;
+    document.getElementById('kf-resid').textContent = `Δ${resid.toFixed(3)} (innovation norm)`;
+  }
+
+  // Integrity stats
+  document.getElementById('int-ok').textContent      = goodPackets;
+  document.getElementById('int-crc').textContent     = crcFails;
+  document.getElementById('int-partial').textContent = partialJson;
+  document.getElementById('int-repair').textContent  = repaired;
+
+  // Reconstruction rate
+  const reconRate = sessionPackets > 0 ? ((goodPackets + repaired) / sessionPackets * 100).toFixed(0) : '--';
+  document.getElementById('reconstructionRate').textContent = `RECON RATE: ${reconRate}%`;
+}
+
+/* ─────────────────────────────────────────────────────
+   CLOCK
+───────────────────────────────────────────────────── */
+function updateClock() {
+  const d = new Date();
+  const z = n => String(n).padStart(2,'0');
+  document.getElementById('live-clock').textContent =
+    `${z(d.getUTCHours())}:${z(d.getUTCMinutes())}:${z(d.getUTCSeconds())}Z`;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+/* ─────────────────────────────────────────────────────
+   MAIN SIMULATION TICK
+───────────────────────────────────────────────────── */
+let lastFrameTime = 0;
+const TICK_MS = 80;
+
+function tick(ts) {
+  if (!paused && ts - lastFrameTime > TICK_MS) {
+    lastFrameTime = ts;
+    frameCount++;
+
+    nodes.forEach(n => {
+      if (!n.online) return;
+
+      // Move
+      const spd = speedMultiplier / 10000;
+      n.x += n.vx * speedMultiplier;
+      n.y += n.vy * speedMultiplier;
+
+      // Bounce
+      if (n.x < 0.05 || n.x > 0.95) { n.vx *= -1; n.heading = (360 - n.heading) % 360; }
+      if (n.y < 0.05 || n.y > 0.95) { n.vy *= -1; n.heading = (180 - n.heading + 360) % 360; }
+      n.x = Math.max(0.05, Math.min(0.95, n.x));
+      n.y = Math.max(0.05, Math.min(0.95, n.y));
+
+      // Drift heading
+      n.heading = (n.heading + (Math.random() - 0.5) * 2 + 360) % 360;
+
+      // RSSI drift
+      n.rssi += (Math.random() - 0.5) * 3;
+      n.rssi = Math.max(-130, Math.min(-60, n.rssi));
+
+      // History trail
+      if (frameCount % 5 === 0) {
+        n.history.push({ x: n.x, y: n.y });
+        if (n.history.length > 20) n.history.shift();
+      }
+
+      // Process packet every N frames
+      if (frameCount % 8 === 0 && n.status !== STATUS.FRAGMENTED) {
+        processPacket(n);
+        addPacketPulse(n.status === STATUS.VERIFIED ? 'ok' : n.status === STATUS.ESTIMATED ? 'frag' : 'drop');
+      }
+    });
+
+    drawMap();
+    drawPacketStream();
+    drawIntegrityRing();
+    renderNodeTable();
+    renderRssiSpark();
+    updateHeaderMetrics();
+  }
+
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+/* ─────────────────────────────────────────────────────
+   BUTTON ACTIONS
+───────────────────────────────────────────────────── */
+function simulateFragmentation() {
+  const d3 = nodes.find(n => n.id === 'DELTA-03');
+  if (!d3 || !d3.online) return;
+  d3.status = STATUS.FRAGMENTED;
+  crcFails++;
+  addLog('DELTA-03', 'MANUAL: CRC fault injected — simulating dead zone', 'err');
+  addRawPacket('DELTA-03', 'DROP', '??:??:??:??:??:??:??');
+  setTimeout(() => {
+    d3.status = STATUS.ESTIMATED;
+    addLog('DELTA-03', 'Kalman filter engaged — predicting from t-1,t-2 state', 'warn');
+    partialJson++;
+  }, 1500);
+  setTimeout(() => {
+    d3.status = STATUS.VERIFIED;
+    reconCount++;
+    repaired++;
+    goodPackets++;
+    document.getElementById('m-recon').textContent = reconCount;
+    kalmanUpdate(d3, d3.x, d3.y);
+    addLog('DELTA-03', `Packet reconstructed — header auto-appended from node profile. Kalman σ=${d3.sigma.toFixed(1)}m`, 'ok');
+    addRawPacket('DELTA-03', 'REPAIRED', `{"id":"DELTA-03","lat":${coordFmt(d3.x)},"lon":${coordFmt(d3.y)},"repaired":true}`);
+  }, 5000);
+}
+
+function togglePause() {
+  paused = !paused;
+  document.getElementById('pauseBtn').textContent = paused ? 'RESUME' : 'PAUSE';
+  document.getElementById('pauseBtn').style.color = paused ? 'var(--amber)' : '';
+}
+
+function toggleAutocorrect() {
+  autocorrect = !autocorrect;
+  const btn = document.getElementById('autocorrectBtn');
+  btn.textContent = autocorrect ? 'ON' : 'OFF';
+  btn.style.color = autocorrect ? 'var(--green)' : 'var(--red)';
+  addLog('SYSTEM', `Auto-correction ${autocorrect ? 'ENABLED' : 'DISABLED'}`, autocorrect ? 'ok' : 'warn');
+}
+
+function setLossRate(v) {
+  lossRate = v / 100;
+  document.getElementById('lossRangeVal').textContent = v + '%';
+}
+
+function setFragProb(v) {
+  fragProb = v / 100;
+  document.getElementById('fragRangeVal').textContent = v + '%';
+}
+
+function setNodeSpeed(v) {
+  speedMultiplier = parseInt(v);
+  document.getElementById('speedRangeVal').textContent = v + 'x';
+}
+
+function addNode() {
+  const offline = nodes.find(n => !n.online);
+  if (offline) {
+    offline.online = true;
+    offline.x = 0.1 + Math.random() * 0.8;
+    offline.y = 0.1 + Math.random() * 0.8;
+    offline.status = STATUS.VERIFIED;
+    offline.history = [];
+    addLog(offline.id, 'Node came online — joining LoRa mesh', 'ok');
+  }
+}
+
+function killRandomNode() {
+  const online = nodes.filter(n => n.online);
+  if (online.length <= 2) return;
+  const n = online[Math.floor(Math.random() * online.length)];
+  n.online = false;
+  n.status = STATUS.OFFLINE;
+  addLog(n.id, 'Signal lost — node offline (timeout 30s)', 'err');
+}
+
+function resetSim() {
+  frameCount = 0; reconCount = 0; sessionPackets = 0;
+  goodPackets = 0; crcFails = 0; partialJson = 0; repaired = 0;
+  logEntries.length = 0; rawEntries.length = 0; PACKET_BUF.length = 0;
+  initNodes();
+  renderLog(); renderRawLog();
+  document.getElementById('m-recon').textContent = '0';
+  addLog('SYSTEM', 'Simulation reset — all nodes reinitialized', 'info');
+}
+
+/* ─────────────────────────────────────────────────────
+   INITIAL LOG ENTRIES
+───────────────────────────────────────────────────── */
+addLog('SYSTEM', 'LoRa gateway initialized — 868 MHz, SF12, BW125kHz', 'info');
+addLog('SYSTEM', 'Historical data buffer loaded — t-12 frames per node', 'info');
+addLog('DELTA-03', 'Node joined mesh — initial Kalman state set', 'ok');
+addLog('SYSTEM', 'Checksum validator armed — NMEA + JSON dual-mode', 'info');
+addLog('SYSTEM', 'Kalman filter coefficients: Q=0.0001, R=0.4, initialized', 'violet');
+</script>
+
+</body>
+</html>
